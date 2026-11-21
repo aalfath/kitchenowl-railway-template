@@ -10,6 +10,9 @@ PORT="${PORT:-8080}"
 
 if [ -n "${DATABASE_URL:-}" ]; then
   eval "$(python /usr/local/lib/railway/dburl.py)"
+  # libpq connect timeout: a database that disappears mid-start fails fast (and Railway restarts us)
+  # instead of hanging until the health check gives up.
+  export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
   echo "railway-start: using PostgreSQL at ${DB_HOST}:${DB_PORT}/${DB_NAME}"
   deadline=$(( $(date +%s) + ${DB_WAIT_SECONDS:-180} ))
   until python -c 'import os,psycopg; psycopg.connect(host=os.environ["DB_HOST"],port=os.environ["DB_PORT"],dbname=os.environ["DB_NAME"],user=os.environ["DB_USER"],password=os.environ["DB_PASSWORD"],connect_timeout=5).close()' 2>/dev/null; do
@@ -27,8 +30,8 @@ sed -i -E "s/^http = (\[::\])?:[0-9]+$/http = \1:${PORT}/" wsgi.ini
 
 mkdir -p "$STORAGE_PATH/upload"
 chown -R kitchenowl:kitchenowl "$STORAGE_PATH"
-gosu kitchenowl flask db upgrade
 gosu kitchenowl env PYTHONPATH=/usr/src/kitchenowl python /usr/local/lib/railway/bootstrap.py
 
-# The upstream entrypoint runs the (now no-op) migration again, updates default items, then execs uWSGI.
+# Migrations + first admin in one Python process (railway/bootstrap.py).
+# The upstream entrypoint then runs the (now no-op) migration again, updates default items, then execs uWSGI.
 exec ./entrypoint.sh "$@"
